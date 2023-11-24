@@ -19,17 +19,17 @@ struct kvraw *kvraw_open(const char *pathname);
 void kvraw_close(struct kvraw *kvraw);
 
 int kvraw_lookup(struct kvraw *kvraw,
-		 void *key,
-		 uint64_t *key_len, /* in/out */
-		 void *val,
-		 uint64_t *val_len, /* in/out */
-		 uint64_t *off);    /* in/out */
+                 void *key,
+                 uint64_t *key_len, /* in/out */
+                 void *val,
+                 uint64_t *val_len, /* in/out */
+                 uint64_t *off);    /* in/out */
 
 int kvraw_append(struct kvraw *kvraw,
-		 const void *key,
-		 uint64_t key_len,
-		 const void *val,
-		 uint64_t val_len,
-		 uint64_t *off);
+                 const void *key,
+                 uint64_t key_len,
+                 const void *val,
+                 uint64_t val_len,
+                 uint64_t *off);
 
 #endif /* _KVRAW_H_ */

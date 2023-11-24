@@ -21,9 +21,9 @@ void device_close(struct device *device);
 int device_read(struct device *device, void *buf, uint64_t off, uint64_t len);
 
 int device_write(struct device *device,
-		 const void *buf,
-		 uint64_t off,
-		 uint64_t len);
+                 const void *buf,
+                 uint64_t off,
+                 uint64_t len);
 
 uint64_t device_size(const struct device *device);
 
