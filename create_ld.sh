@@ -8,7 +8,7 @@
 rm -f loopback.img
 
 # first create a file
-dd if=/dev/zero of=loopback.img bs=2048 count=1000
+dd if=/dev/zero of=loopback.img bs=1M count=100
 
 # create a loopback device
 #losetup /dev/loop0 loopback.img

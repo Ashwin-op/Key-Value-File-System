@@ -11,7 +11,7 @@
 #include "device.h"
 #include "logfs.h"
 
-#define WCACHE_BLOCKS 32
+#define WCACHE_BLOCKS 33
 #define RCACHE_BLOCKS 256
 
 /**
@@ -31,10 +31,10 @@
 /* research the above Needed API and design accordingly */
 
 struct queue {
-    char *data; // contiguous memory to store the data
-    uint64_t head, tail; // head and tail of the queue
-    uint64_t capacity; // capacity of the queue
-    uint64_t utilized; // utilized space in the queue
+    char *data;
+    uint64_t head, tail;
+    uint64_t capacity;
+    uint64_t utilized;
 };
 
 struct worker {
@@ -47,7 +47,7 @@ struct worker {
 
 struct cache_block {
     char *data;
-    uint64_t offset; // offset of the block in the device (multiples of block size)
+    uint64_t offset;
     short valid;
     uint64_t idx;
 };
@@ -65,6 +65,10 @@ struct logfs_metadata {
     uint64_t utilized;
 };
 
+uint64_t normalize_block(struct logfs *logfs, uint64_t i) {
+    return i / device_block(logfs->device) * device_block(logfs->device);
+}
+
 void mark_cache_invalid(struct logfs *logfs, uint64_t offset) {
     int i;
     for (i = 0; i < RCACHE_BLOCKS; i++) {
@@ -75,138 +79,42 @@ void mark_cache_invalid(struct logfs *logfs, uint64_t offset) {
 }
 
 void write_to_disk(struct logfs *logfs) {
-    uint64_t block_size = device_block(logfs->device);
+    char *buf = logfs->write_queue->data + logfs->write_queue->head;
+    uint64_t normalized_tail = normalize_block(logfs, logfs->write_queue->tail);
+    uint64_t normalized_utilized = normalize_block(logfs, logfs->utilized);
+    uint64_t normalized_device_offset = normalized_utilized + device_block(logfs->device);
+    uint64_t to_write, utilized, i;
 
-    // if tail is greater than head
-    if (logfs->write_queue->tail > logfs->write_queue->head) {
-        // check how many blocks needed to be read from the device
-        uint64_t size_to_read = logfs->write_queue->tail - logfs->write_queue->head;
-        // see if it's overlapping between two blocks in the device
-        uint64_t blocks_to_read = size_to_read / block_size;
-        if ((logfs->utilized + size_to_read) / block_size > logfs->utilized / block_size) {
-            blocks_to_read++;
-        }
-        if (size_to_read % block_size) {
-            blocks_to_read++;
-        }
-        // get the starting block offset
-        uint64_t start_block_offset = (logfs->utilized / block_size * block_size) + device_block(logfs->device);
-        // read the blocks from the device
-        char *blocks = malloc(blocks_to_read * block_size);
-        if (!blocks) {
-            TRACE("out of memory");
-            return;
-        }
-        if (device_read(logfs->device, blocks, start_block_offset, blocks_to_read * block_size)) {
-            TRACE("device_read()");
-            free(blocks);
-            return;
-        }
-        // copy the data from the queue to the blocks
-        memcpy(logfs->utilized % block_size + blocks, logfs->write_queue->data + logfs->write_queue->head,
-               logfs->write_queue->tail - logfs->write_queue->head);
-        // write the blocks to the device
-        if (device_write(logfs->device, blocks, start_block_offset, blocks_to_read * block_size)) {
+    if (logfs->write_queue->head == normalized_tail) {
+        if (device_write(logfs->device, buf, normalized_device_offset, device_block(logfs->device))) {
             TRACE("device_write()");
-            free(blocks);
             return;
         }
-        // update the utilized
-        logfs->utilized += (logfs->write_queue->tail - logfs->write_queue->head);
-        // update the utilized
-        logfs->write_queue->utilized -= (logfs->write_queue->tail - logfs->write_queue->head);
-        // update the head
-        logfs->write_queue->head = logfs->write_queue->tail;
-        free(blocks);
 
-        mark_cache_invalid(logfs, start_block_offset);
-    } else if (logfs->write_queue->tail < logfs->write_queue->head) {
-        // write from head to the end of the queue
-        // then write from the beginning of the queue to tail
+        mark_cache_invalid(logfs, normalized_utilized);
+        logfs->utilized += logfs->write_queue->utilized;
+        logfs->write_queue->utilized = 0;
+    } else {
+        if (logfs->write_queue->head < normalized_tail) {
+            to_write = normalized_tail + device_block(logfs->device) - logfs->write_queue->head;
+            utilized = logfs->write_queue->utilized;
+            logfs->write_queue->head = normalized_tail % logfs->write_queue->capacity;
+        } else {
+            to_write = logfs->write_queue->capacity - logfs->write_queue->head;
+            utilized = logfs->write_queue->capacity - logfs->write_queue->head;
+            logfs->write_queue->head = 0;
+        }
 
-        // check how many blocks needed to be read from the device
-        uint64_t size_to_read = logfs->write_queue->capacity - logfs->write_queue->head;
-        // see if it's overlapping between two blocks in the device
-        uint64_t blocks_to_read = size_to_read / block_size;
-        if ((logfs->utilized + size_to_read) / block_size > logfs->utilized / block_size) {
-            blocks_to_read++;
-        }
-        if (size_to_read % block_size) {
-            blocks_to_read++;
-        }
-        // get the starting block offset
-        uint64_t start_block_offset = (logfs->utilized / block_size * block_size) + device_block(logfs->device);
-        // read the blocks from the device
-        char *blocks = malloc(blocks_to_read * block_size);
-        if (!blocks) {
-            TRACE("out of memory");
-            return;
-        }
-        if (device_read(logfs->device, blocks, start_block_offset, blocks_to_read * block_size)) {
-            TRACE("device_read()");
-            free(blocks);
-            return;
-        }
-        // copy the data from the queue to the blocks
-        memcpy(logfs->utilized % block_size + blocks, logfs->write_queue->data + logfs->write_queue->head,
-               logfs->write_queue->capacity - logfs->write_queue->head);
-        // write the blocks to the device
-        if (device_write(logfs->device, blocks, start_block_offset, blocks_to_read * block_size)) {
+        if (device_write(logfs->device, buf, normalized_device_offset, to_write)) {
             TRACE("device_write()");
-            free(blocks);
             return;
         }
-        // update the utilized
-        logfs->utilized += (logfs->write_queue->capacity - logfs->write_queue->head);
-        // update the utilized
-        logfs->write_queue->utilized -= (logfs->write_queue->capacity - logfs->write_queue->head);
-        // update the head
-        logfs->write_queue->head = 0;
-        free(blocks);
 
-        mark_cache_invalid(logfs, start_block_offset);
-
-        // check how many blocks needed to be read from the device
-        size_to_read = logfs->write_queue->tail;
-        // see if it's overlapping between two blocks in the device
-        blocks_to_read = size_to_read / block_size;
-        if ((logfs->utilized + size_to_read) / block_size > logfs->utilized / block_size) {
-            blocks_to_read++;
+        for (i = 0; i < to_write / device_block(logfs->device); i++) {
+            mark_cache_invalid(logfs, normalized_utilized + i * device_block(logfs->device));
         }
-        if (size_to_read % block_size) {
-            blocks_to_read++;
-        }
-        // get the starting block offset
-        start_block_offset = (logfs->utilized / block_size * block_size) + device_block(logfs->device);
-        // read the blocks from the device
-        blocks = malloc(blocks_to_read * block_size);
-        if (!blocks) {
-            TRACE("out of memory");
-            return;
-        }
-        if (device_read(logfs->device, blocks, start_block_offset, blocks_to_read * block_size)) {
-            TRACE("device_read()");
-            free(blocks);
-            return;
-        }
-        // copy the data from the queue to the blocks
-        memcpy(logfs->utilized % block_size + blocks, logfs->write_queue->data,
-               logfs->write_queue->tail);
-        // write the blocks to the device
-        if (device_write(logfs->device, blocks, start_block_offset, blocks_to_read * block_size)) {
-            TRACE("device_write()");
-            free(blocks);
-            return;
-        }
-        // update the utilized
-        logfs->utilized += (logfs->write_queue->tail);
-        // update the utilized
-        logfs->write_queue->utilized -= (logfs->write_queue->tail);
-        // update the head
-        logfs->write_queue->head = logfs->write_queue->tail;
-        free(blocks);
-
-        mark_cache_invalid(logfs, start_block_offset);
+        logfs->utilized += utilized;
+        logfs->write_queue->utilized -= utilized;
     }
 }
 
@@ -226,7 +134,6 @@ void *worker(void *arg) {
             }
         }
 
-        // If there is data in the queue, write it to the device
         if (logfs->write_queue->utilized >= device_block(logfs->device) || logfs->worker->force_write) {
             write_to_disk(logfs);
 
@@ -422,10 +329,21 @@ void logfs_close(struct logfs *logfs) {
     FREE(logfs);
 }
 
-int logfs_read(struct logfs *logfs, void *buf, uint64_t off, size_t len) {
-    uint64_t current_offset, min_idx, max_idx;
-    char *buffer_ptr;
+int get_from_cache(struct logfs *logfs, void *buf, uint64_t block_offset, uint64_t data_offset, uint64_t to_read) {
     int i;
+    for (i = 0; i < RCACHE_BLOCKS; i++) {
+        if (logfs->read_cache[i].valid && logfs->read_cache[i].offset == block_offset - device_block(logfs->device)) {
+            memcpy(buf, logfs->read_cache[i].data + data_offset, to_read);
+            return 0;
+        }
+    }
+    return -1;
+}
+
+int logfs_read(struct logfs *logfs, void *buf, uint64_t off, size_t len) {
+    uint64_t written, start_block_offset, end_block_offset;
+    int num_blocks, i;
+    char *result;
 
     if (!buf || !len) {
         return 0;
@@ -449,82 +367,87 @@ int logfs_read(struct logfs *logfs, void *buf, uint64_t off, size_t len) {
             }
         }
 
+        if (logfs->write_queue->utilized == 0) {
+            if (pthread_cond_signal(&logfs->worker->cond)) {
+                TRACE("pthread_cond_signal()");
+                return -1;
+            }
+            if (pthread_mutex_unlock(&logfs->worker->mutex)) {
+                TRACE("pthread_mutex_unlock()");
+                return -1;
+            }
+            break;
+        }
+
+
         if (pthread_mutex_unlock(&logfs->worker->mutex)) {
             TRACE("pthread_mutex_unlock()");
             return -1;
         }
-
-        break;
     }
 
-    // Iterate through blocks and read from cache or device
-    current_offset = off;
-    buffer_ptr = (char *) buf;
+    written = 0;
+    start_block_offset = normalize_block(logfs, off);
+    end_block_offset = normalize_block(logfs, off + len);
+    num_blocks = (int) ((end_block_offset - start_block_offset) / device_block(logfs->device)) + 1;
 
-    while (current_offset < off + len) {
-        uint64_t block_idx = current_offset / device_block(logfs->device);
+    result = malloc(len);
 
-        // Check if the block is in the cache
-        int found_in_cache = 0;
-        for (i = 0; i < RCACHE_BLOCKS; i++) {
-            if (logfs->read_cache[i].valid && logfs->read_cache[i].offset == block_idx * device_block(logfs->device)) {
-                // Copy data from cache to buffer
-                memcpy(buffer_ptr,
-                       logfs->read_cache[i].data + (current_offset - block_idx * device_block(logfs->device)),
-                       MIN(off + len - current_offset,
-                           device_block(logfs->device) - (current_offset % device_block(logfs->device))));
-                found_in_cache = 1;
-                break;
-            }
+    for (i = 0; i < num_blocks; i++) {
+        uint64_t block_offset = start_block_offset + i * device_block(logfs->device);
+        uint64_t data_offset, to_read;
+
+        if (i == 0) {
+            data_offset = off - start_block_offset;
+            to_read = MIN(device_block(logfs->device) - data_offset, len);
+        } else if (i == num_blocks - 1) {
+            data_offset = 0;
+            to_read = off + len - end_block_offset;
+        } else {
+            data_offset = 0;
+            to_read = device_block(logfs->device);
         }
 
-        // If not found in cache, read from device and update cache
-        if (!found_in_cache) {
-            char *block = malloc(device_block(logfs->device));
-            if (!block) {
+        if (get_from_cache(logfs, result + written, block_offset, data_offset, to_read) != 0) {
+            int min_idx = 0, max_idx = 0, j;
+            char *data;
+
+            for (j = 0; j < RCACHE_BLOCKS; j++) {
+                if (logfs->read_cache[j].idx < logfs->read_cache[min_idx].idx) {
+                    min_idx = j;
+                }
+                if (logfs->read_cache[j].idx > logfs->read_cache[max_idx].idx) {
+                    max_idx = j;
+                }
+            }
+
+            data = malloc(device_block(logfs->device));
+            if (!data) {
                 TRACE("out of memory");
                 return -1;
             }
 
-            if (device_read(logfs->device, block, block_idx * device_block(logfs->device),
-                            device_block(logfs->device))) {
+            if (device_read(logfs->device, data, block_offset, device_block(logfs->device))) {
                 TRACE("device_read()");
-                free(block);
                 return -1;
             }
 
-            // get the min and max idx
-            min_idx = 0;
-            max_idx = 0;
-            for (i = 0; i < RCACHE_BLOCKS; i++) {
-                if (logfs->read_cache[i].idx < logfs->read_cache[min_idx].idx) {
-                    min_idx = i;
-                }
-                if (logfs->read_cache[i].idx > logfs->read_cache[max_idx].idx) {
-                    max_idx = i;
-                }
-            }
-
-            // replace the block with the min idx
-            memcpy(logfs->read_cache[min_idx].data, block, device_block(logfs->device));
+            memcpy(logfs->read_cache[min_idx].data, data, device_block(logfs->device));
+            logfs->read_cache[min_idx].offset = block_offset - device_block(logfs->device);
             logfs->read_cache[min_idx].valid = 1;
-            logfs->read_cache[min_idx].offset = block_idx * device_block(logfs->device);
             logfs->read_cache[min_idx].idx = logfs->read_cache[max_idx].idx + 1;
 
-            // Copy data from block to buffer
-            memcpy(buffer_ptr, block + (current_offset - block_idx * device_block(logfs->device)),
-                   MIN(off + len - current_offset,
-                       device_block(logfs->device) - (current_offset % device_block(logfs->device))));
+            free(data);
 
-            free(block);
+            memcpy(result + written, logfs->read_cache[min_idx].data + data_offset, to_read);
         }
 
-        // Update buffer pointer and current offset
-        buffer_ptr += MIN(off + len - current_offset,
-                          device_block(logfs->device) - (current_offset % device_block(logfs->device)));
-        current_offset += MIN(off + len - current_offset,
-                              device_block(logfs->device) - (current_offset % device_block(logfs->device)));
+        written += to_read;
     }
+
+    memcpy(buf, result, len);
+
+    free(result);
 
     return 0;
 }
@@ -536,9 +459,13 @@ void queue_add(struct logfs *logfs, const void *buf, uint64_t len) {
     } else {
         uint64_t space_at_end = logfs->write_queue->capacity - logfs->write_queue->tail;
         uint64_t leftover = len - space_at_end;
-        memcpy(logfs->write_queue->data + logfs->write_queue->tail, buf, space_at_end);
-        memcpy(logfs->write_queue->data, (char *) buf + space_at_end, leftover);
-        logfs->write_queue->tail = leftover;
+        if (space_at_end) {
+            memcpy(logfs->write_queue->data + logfs->write_queue->tail, buf, space_at_end);
+        }
+        if (leftover) {
+            memcpy(logfs->write_queue->data, (char *) buf + space_at_end, leftover);
+        }
+        logfs->write_queue->tail = leftover % logfs->write_queue->capacity;
     }
 
     logfs->write_queue->utilized += len;
@@ -547,6 +474,11 @@ void queue_add(struct logfs *logfs, const void *buf, uint64_t len) {
 int logfs_append(struct logfs *logfs, const void *buf, uint64_t len) {
     assert(logfs);
     assert(buf || !len);
+
+    if (logfs->utilized + len > logfs->capacity) {
+        TRACE("out of space");
+        return -1;
+    }
 
     while (1) {
         if (pthread_mutex_lock(&logfs->worker->mutex)) {
