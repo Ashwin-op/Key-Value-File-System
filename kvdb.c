@@ -214,6 +214,44 @@ kvdb_open(const char *pathname) {
         TRACE(0);
         return NULL;
     }
+
+    if (kvraw_size(kvdb->kvraw) > 18) {
+        uint64_t off = 18;
+        while (off < kvraw_size(kvdb->kvraw)) {
+            uint64_t key_len, val_len;
+            void *key, *val;
+
+            key = malloc(KVDB_MAX_KEY_LEN);
+            val = malloc(KVDB_MAX_VAL_LEN);
+            key_len = KVDB_MAX_KEY_LEN;
+            val_len = KVDB_MAX_VAL_LEN;
+            if (kvraw_lookup(kvdb->kvraw,
+                             key,
+                             &key_len,
+                             val,
+                             &val_len,
+                             &off)) {
+                TRACE(0);
+                return NULL;
+            }
+            if (!key_len) {
+                break;
+            }
+
+            uint64_t *ref;
+            if (!(ref = index_update(kvdb->index, key, key_len))) {
+                TRACE(0);
+                return NULL;
+            }
+            (*ref) = off + 18;
+
+            free(key);
+            free(val);
+
+            off += 18 + 16 + key_len + val_len;
+            ++kvdb->size;
+        }
+    }
     return kvdb;
 }
 

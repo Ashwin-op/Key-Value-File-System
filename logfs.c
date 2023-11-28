@@ -515,3 +515,9 @@ int logfs_append(struct logfs *logfs, const void *buf, uint64_t len) {
 
     return 0;
 }
+
+uint64_t logfs_size(struct logfs *logfs) {
+    assert(logfs);
+
+    return logfs->utilized;
+}

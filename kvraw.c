@@ -52,7 +52,7 @@ read_meta(struct kvraw *kvraw, uint64_t off, struct meta *meta) {
 struct kvraw *
 kvraw_open(const char *pathname) {
     struct kvraw *kvraw;
-    uint64_t off;
+    uint64_t off, size;
 
     assert(safe_strlen(pathname));
 
@@ -66,13 +66,32 @@ kvraw_open(const char *pathname) {
         TRACE(0);
         return NULL;
     }
-    off = 0;
-    if (kvraw_append(kvraw, "", 1, "", 1, &off)) {
-        kvraw_close(kvraw);
-        TRACE(0);
-        return NULL;
+
+    size = logfs_size(kvraw->logfs);
+
+    if (size == 0) {
+        off = 0;
+        if (kvraw_append(kvraw, "", 1, "", 1, &off)) {
+            kvraw_close(kvraw);
+            TRACE(0);
+            return NULL;
+        }
+        assert(0 == off);
+    } else {
+        struct meta meta;
+        kvraw->size = size;
+        if (read_meta(kvraw, 0, &meta)) {
+            kvraw_close(kvraw);
+            TRACE(0);
+            return NULL;
+        }
+        if (!meta.key_len || !meta.val_len) {
+            TRACE("corrupt data");
+            kvraw_close(kvraw);
+            return NULL;
+        }
     }
-    assert(0 == off);
+
     return kvraw;
 }
 
@@ -148,4 +167,10 @@ kvraw_append(struct kvraw *kvraw,
     kvraw->size += META_LEN + meta.key_len + meta.val_len;
     (*off) = off_;
     return 0;
+}
+
+uint64_t kvraw_size(struct kvraw *kvraw) {
+    assert(kvraw);
+
+    return kvraw->size;
 }

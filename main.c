@@ -298,6 +298,61 @@ basic_logic(void) {
     return 0;
 }
 
+static int test_store_restore_state(void) {
+    const char *const KEY = "KEY";
+    const char *const VAL = "VAL";
+    struct kvdb *kvdb;
+    uint64_t val_len;
+    char val[32];
+
+    if (!(kvdb = kvdb_open(PATHNAME))) {
+        TRACE(0);
+        return -1;
+    }
+    if ((0 != kvdb_size(kvdb)) || (0 != kvdb_waste(kvdb))) {
+        kvdb_close(kvdb);
+        TRACE("software");
+        return -1;
+    }
+
+    /* insert, lookup */
+
+    val_len = sizeof(val);
+    if (kvdb_insert(kvdb, KEY, SLEN(KEY), VAL, SLEN(VAL)) ||
+        kvdb_lookup(kvdb, KEY, SLEN(KEY), val, &val_len) ||
+        (SLEN(VAL) != val_len) ||
+        memcmp(VAL, val, val_len) ||
+        (1 != kvdb_size(kvdb)) ||
+        (0 != kvdb_waste(kvdb))) {
+        kvdb_close(kvdb);
+        TRACE("software");
+        return -1;
+    }
+
+    kvdb_close(kvdb);
+
+    if (!(kvdb = kvdb_open(PATHNAME))) {
+        TRACE(0);
+        return -1;
+    }
+
+    /* lookup */
+
+    val_len = sizeof(val);
+    if (kvdb_lookup(kvdb, KEY, SLEN(KEY), val, &val_len) ||
+        (SLEN(VAL) != val_len) ||
+        memcmp(VAL, val, val_len) ||
+        (1 != kvdb_size(kvdb)) ||
+        (0 != kvdb_waste(kvdb))) {
+        kvdb_close(kvdb);
+        TRACE("software");
+        return -1;
+    }
+
+    kvdb_close(kvdb);
+    return 0;
+}
+
 int
 main(int argc, char *argv[]) {
     if (2 != argc) {
@@ -319,16 +374,18 @@ main(int argc, char *argv[]) {
 
     /* test */
 
-    /*UNUSED(basic_logic);
+    UNUSED(basic_logic);
     UNUSED(heavy_rewrite);
     UNUSED(read_write_single);
     UNUSED(read_write_small);
-    UNUSED(read_write_large);*/
-    TEST(basic_logic, "basic_logic");
-    TEST(heavy_rewrite, "heavy_rewrite");
-    TEST(read_write_single, "read_write_single");
-    TEST(read_write_small, "read_write_small");
-    TEST(read_write_large, "read_write_large");
+    UNUSED(read_write_large);
+    UNUSED(test_store_restore_state);
+//    TEST(basic_logic, "basic_logic");
+//    TEST(heavy_rewrite, "heavy_rewrite");
+//    TEST(read_write_single, "read_write_single");
+//    TEST(read_write_small, "read_write_small");
+//    TEST(read_write_large, "read_write_large");
+    TEST(test_store_restore_state, "test_store_restore_state");
 
     /* postlude */
 
