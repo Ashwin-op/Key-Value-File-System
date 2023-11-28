@@ -82,7 +82,7 @@ void write_to_disk(struct logfs *logfs) {
     char *buf = logfs->write_queue->data + logfs->write_queue->head;
     uint64_t normalized_tail = normalize_block(logfs, logfs->write_queue->tail);
     uint64_t normalized_utilized = normalize_block(logfs, logfs->utilized);
-    uint64_t normalized_device_offset = normalized_utilized + device_block(logfs->device);
+    uint64_t normalized_device_offset = normalized_utilized + RESTORE_FROM_FILE * device_block(logfs->device);
     uint64_t to_write, utilized, i;
 
     if (logfs->write_queue->head == normalized_tail) {
@@ -202,7 +202,7 @@ int setup_device(struct logfs *logfs, const char *pathname) {
     }
 
     logfs->capacity = device_size(logfs->device);
-    logfs->utilized = get_metadata(logfs);
+    logfs->utilized = RESTORE_FROM_FILE * get_metadata(logfs);
 
     return 0;
 }
@@ -282,7 +282,9 @@ void logfs_close(struct logfs *logfs) {
 
     assert(logfs);
 
-    set_metadata(logfs, logfs->utilized);
+    if (RESTORE_FROM_FILE) {
+        set_metadata(logfs, logfs->utilized);
+    }
 
     if (logfs) {
         if (logfs->worker) {
@@ -332,7 +334,7 @@ void logfs_close(struct logfs *logfs) {
 int get_from_cache(struct logfs *logfs, void *buf, uint64_t block_offset, uint64_t data_offset, uint64_t to_read) {
     int i;
     for (i = 0; i < RCACHE_BLOCKS; i++) {
-        if (logfs->read_cache[i].valid && logfs->read_cache[i].offset == block_offset - device_block(logfs->device)) {
+        if (logfs->read_cache[i].valid && logfs->read_cache[i].offset == block_offset - RESTORE_FROM_FILE * device_block(logfs->device)) {
             memcpy(buf, logfs->read_cache[i].data + data_offset, to_read);
             return 0;
         }
@@ -349,7 +351,7 @@ int logfs_read(struct logfs *logfs, void *buf, uint64_t off, size_t len) {
         return 0;
     }
 
-    off += device_block(logfs->device);
+    off += RESTORE_FROM_FILE * device_block(logfs->device);
 
     while (1) {
         if (pthread_mutex_lock(&logfs->worker->mutex)) {
@@ -433,7 +435,7 @@ int logfs_read(struct logfs *logfs, void *buf, uint64_t off, size_t len) {
             }
 
             memcpy(logfs->read_cache[min_idx].data, data, device_block(logfs->device));
-            logfs->read_cache[min_idx].offset = block_offset - device_block(logfs->device);
+            logfs->read_cache[min_idx].offset = block_offset - RESTORE_FROM_FILE * device_block(logfs->device);
             logfs->read_cache[min_idx].valid = 1;
             logfs->read_cache[min_idx].idx = logfs->read_cache[max_idx].idx + 1;
 

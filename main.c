@@ -374,18 +374,15 @@ main(int argc, char *argv[]) {
 
     /* test */
 
-    UNUSED(basic_logic);
-    UNUSED(heavy_rewrite);
-    UNUSED(read_write_single);
-    UNUSED(read_write_small);
-    UNUSED(read_write_large);
-    UNUSED(test_store_restore_state);
-//    TEST(basic_logic, "basic_logic");
-//    TEST(heavy_rewrite, "heavy_rewrite");
-//    TEST(read_write_single, "read_write_single");
-//    TEST(read_write_small, "read_write_small");
-//    TEST(read_write_large, "read_write_large");
-    TEST(test_store_restore_state, "test_store_restore_state");
+    if (!RESTORE_FROM_FILE) {
+        TEST(basic_logic, "basic_logic");
+        TEST(heavy_rewrite, "heavy_rewrite");
+        TEST(read_write_single, "read_write_single");
+        TEST(read_write_small, "read_write_small");
+        TEST(read_write_large, "read_write_large");
+    } else {
+        TEST(test_store_restore_state, "test_store_restore_state");
+    }
 
     /* postlude */
 

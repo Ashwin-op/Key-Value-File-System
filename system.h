@@ -26,6 +26,8 @@
 
 #define ARRAY_SIZE(a) ( (sizeof (a)) / (sizeof (a[0])) )
 
+#define RESTORE_FROM_FILE 1
+
 #define UNUSED(s)                \
     do {                    \
         (void)(s);            \

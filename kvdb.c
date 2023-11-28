@@ -16,6 +16,8 @@
 #define MUTATE_UPDATE  3
 #define MUTATE_REPLACE 4
 
+#define META_LEN 16
+
 struct kvdb {
     uint64_t size;
     uint64_t waste;
@@ -215,11 +217,12 @@ kvdb_open(const char *pathname) {
         return NULL;
     }
 
-    if (kvraw_size(kvdb->kvraw) > 18) {
+    if (kvraw_size(kvdb->kvraw) > 18 && RESTORE_FROM_FILE) {
         uint64_t off = 18;
         while (off < kvraw_size(kvdb->kvraw)) {
             uint64_t key_len, val_len;
             void *key, *val;
+            uint64_t *ref;
 
             key = malloc(KVDB_MAX_KEY_LEN);
             val = malloc(KVDB_MAX_VAL_LEN);
@@ -238,17 +241,16 @@ kvdb_open(const char *pathname) {
                 break;
             }
 
-            uint64_t *ref;
             if (!(ref = index_update(kvdb->index, key, key_len))) {
                 TRACE(0);
                 return NULL;
             }
-            (*ref) = off + 18;
+            (*ref) = off + META_LEN + 1 + 1;
 
             free(key);
             free(val);
 
-            off += 18 + 16 + key_len + val_len;
+            off += 18 + META_LEN + key_len + val_len;
             ++kvdb->size;
         }
     }
