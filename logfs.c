@@ -96,7 +96,11 @@ void write_to_disk(struct logfs *logfs) {
         logfs->write_queue->utilized = 0;
     } else {
         if (logfs->write_queue->head < normalized_tail) {
-            to_write = normalized_tail + device_block(logfs->device) - logfs->write_queue->head;
+            if (logfs->write_queue->tail == normalized_tail) {
+                to_write = logfs->write_queue->tail - logfs->write_queue->head;
+            } else {
+                to_write = normalized_tail + device_block(logfs->device) - logfs->write_queue->head;
+            }
             utilized = logfs->write_queue->utilized;
             logfs->write_queue->head = normalized_tail % logfs->write_queue->capacity;
         } else {
@@ -334,7 +338,8 @@ void logfs_close(struct logfs *logfs) {
 int get_from_cache(struct logfs *logfs, void *buf, uint64_t block_offset, uint64_t data_offset, uint64_t to_read) {
     int i;
     for (i = 0; i < RCACHE_BLOCKS; i++) {
-        if (logfs->read_cache[i].valid && logfs->read_cache[i].offset == block_offset - RESTORE_FROM_FILE * device_block(logfs->device)) {
+        if (logfs->read_cache[i].valid &&
+            logfs->read_cache[i].offset == block_offset - RESTORE_FROM_FILE * device_block(logfs->device)) {
             memcpy(buf, logfs->read_cache[i].data + data_offset, to_read);
             return 0;
         }
